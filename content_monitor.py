@@ -415,7 +415,7 @@ def main():
         df.drop_duplicates(subset="URL", inplace=True)
 
         # Save to CSV
-        csv_filename = "antipirateria_articulos_filtrados.csv"
+        csv_filename = "monitor_results.csv"
         df.to_csv(csv_filename, index=False, encoding="utf-8-sig")
 
         logger.info(

@@ -1,6 +1,6 @@
-# Anti-Piracy RSS Searcher
+# ContentMonitor
 
-This project is a tool to monitor RSS feeds and perform Google searches to detect content related to digital piracy. It filters results based on specific keywords and generates a CSV report.
+This project is a tool to monitor RSS feeds and perform google searches to detect specific content based on keywords. It filters results and generates a CSV report. It was originally designed for anti-piracy research but can be used for any topic monitoring.
 
 ## Requirements
 
@@ -34,10 +34,10 @@ This project is a tool to monitor RSS feeds and perform Google searches to detec
 2. Ensure you have your Google API credentials ready.
 
 ## Usage
+ 
+ Run the main script:
+ ```bash
+ python content_monitor.py
+ ```
 
-Run the main script:
-```bash
-python BuscadorRSS_filtrado.py
-```
-
-The script will generate a csv file with the relevant results found.
+The script will generate a `monitor_results.csv` file with the relevant results found.
