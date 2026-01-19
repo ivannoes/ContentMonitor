@@ -1,0 +1,5 @@
+feedparser
+pandas
+requests
+google-api-python-client
+python-dotenv
