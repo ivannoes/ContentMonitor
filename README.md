@@ -1,10 +1,33 @@
 # ContentMonitor
 
-This project is a tool to monitor RSS feeds and perform google searches to detect specific content based on keywords. It filters results and generates a CSV report. It was originally designed for anti-piracy research but can be used for any topic monitoring.
+An AI-powered tool that monitors RSS feeds and performs Google searches to detect content based on configurable keywords. It uses an **OpenAI model** with **function calling** (Responses API) to intelligently collect, filter, and summarize results.
+
+Originally designed for anti-piracy research, it can be adapted for any topic monitoring.
+
+## Architecture
+
+```
+content_monitor.py   ← Entry point: builds prompt & runs the agent
+agent.py             ← OpenAI Responses API function-calling loop
+config.py            ← Centralised configuration (env vars, keywords)
+tools/
+  __init__.py        ← Tool registry (add new tools here)
+  base.py            ← Abstract BaseTool class
+  google_search.py   ← Google Custom Search tool
+  feed_reader.py     ← RSS / Atom feed reader tool
+```
+
+### Adding a new tool
+
+1. Create a class that inherits from `BaseTool` in `tools/`.
+2. Implement `name`, `schema`, and `execute`.
+3. Import and append an instance to `TOOL_REGISTRY` in `tools/__init__.py`.
+
+The agent discovers the new tool automatically.
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.10+
 
 ## Installation
 
@@ -15,7 +38,7 @@ This project is a tool to monitor RSS feeds and perform google searches to detec
    ```
 3. Activate the virtual environment:
    - Windows: `.\venv\Scripts\activate`
-   - Unix/MacOS: `source venv/bin/activate`
+   - Unix/macOS: `source venv/bin/activate`
 4. Install dependencies:
    ```bash
    pip install -r requirements.txt
@@ -23,21 +46,26 @@ This project is a tool to monitor RSS feeds and perform google searches to detec
 
 ## Configuration
 
-1. Create a `.env` file in the project root:
-   ```
-   GOOGLE_API_KEY=your_api_key_here
-   GOOGLE_CSE_ID=your_cse_id_here
-   ```
-   **Why do I need these keys?**
-   This tool uses the **Google Custom Search JSON API** to perform automated searches for piracy-related keywords (e.g., "IPTV", "cardsharing") on the web. This allows it to find relevant articles that might not appear in the monitored RSS feeds.
+Create a `.env` file in the project root (see `.env.example`):
 
-2. Ensure you have your Google API credentials ready.
+```
+GOOGLE_API_KEY=your_google_api_key
+GOOGLE_CSE_ID=your_google_cse_id
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=your_preferred_model
+```
+
+| Variable | Purpose |
+|---|---|
+| `GOOGLE_API_KEY` | Google Custom Search JSON API key |
+| `GOOGLE_CSE_ID` | Google Custom Search Engine ID |
+| `OPENAI_API_KEY` | OpenAI API key for the agent |
+| `OPENAI_MODEL` | OpenAI model to use (e.g. `gpt-4o-mini`, `gpt-4o`) |
 
 ## Usage
- 
- Run the main script:
- ```bash
- python content_monitor.py
- ```
 
-The script will generate a `monitor_results.csv` file with the relevant results found.
+```bash
+python content_monitor.py
+```
+
+The agent will read feeds, run Google searches, apply keyword filters, and print a consolidated summary of relevant articles.
