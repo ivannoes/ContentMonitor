@@ -8,8 +8,9 @@ To add a new tool:
 The agent discovers available tools automatically through this registry.
 """
 
-from tools.google_search import GoogleSearchTool
 from tools.feed_reader import FeedReaderTool
+from tools.google_search import GoogleSearchTool
+from tools.web_scraper import WebScraperTool
 
 # ------------------------------------------------------------------
 # Central registry – add new tool instances here.
@@ -17,4 +18,5 @@ from tools.feed_reader import FeedReaderTool
 TOOL_REGISTRY: list = [
     GoogleSearchTool(),
     FeedReaderTool(),
+    WebScraperTool(),
 ]
