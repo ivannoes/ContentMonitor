@@ -12,6 +12,7 @@ loop follows the official OpenAI guidelines:
 """
 
 import json
+import sys
 from typing import Any
 
 from openai import AuthenticationError, OpenAI, RateLimitError
@@ -63,6 +64,11 @@ class ContentAgent:
         ]
 
         while True:
+            print(
+                "\n⏳ Waiting for model response...",
+                file=sys.stderr,
+                flush=True,
+            )
             try:
                 response = self._client.responses.create(
                     model=self._model,
@@ -94,15 +100,30 @@ class ContentAgent:
                 return response.output_text
 
             # Execute each tool and append results
-            for call in function_calls:
+            for i, call in enumerate(function_calls, 1):
                 tool = self._tools_by_name.get(call.name)
                 if tool is None:
+                    print(
+                        f"  ⚠ Unknown tool: {call.name}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                     result = json.dumps(
                         {"error": f"Unknown tool: {call.name}"}
                     )
                 else:
+                    print(
+                        f"  🔧 [{i}/{len(function_calls)}] Running {call.name}...",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                     args = json.loads(call.arguments)
                     result = tool.execute(**args)
+                    print(
+                        f"  ✅ {call.name} done.",
+                        file=sys.stderr,
+                        flush=True,
+                    )
 
                 input_list.append(
                     {
@@ -111,3 +132,46 @@ class ContentAgent:
                         "output": result,
                     }
                 )
+
+    # ------------------------------------------------------------------
+    # Summarization (no tools)
+    # ------------------------------------------------------------------
+
+    def summarize(self, text: str, instructions: str = "") -> str:
+        """Send *text* to the model for summarization only (no tools).
+
+        Parameters
+        ----------
+        text:
+            The content to summarize (e.g. CSV data).
+        instructions:
+            Optional system-level instructions for the model.
+
+        Returns
+        -------
+        str
+            The model's text response.
+        """
+        print(
+            "\n\u23f3 Waiting for model summary...",
+            file=sys.stderr,
+            flush=True,
+        )
+        try:
+            response = self._client.responses.create(
+                model=self._model,
+                instructions=instructions,
+                input=[{"role": "user", "content": text}],
+            )
+        except AuthenticationError:
+            return "Error: Invalid API key. Check your .env file."
+        except RateLimitError:
+            return (
+                "Error: No OpenAI credits remaining. "
+                "Add billing at https://platform.openai.com/account/billing."
+            )
+        except Exception as exc:
+            return f"Error: An unexpected error occurred: {exc}"
+
+        return response.output_text
+
