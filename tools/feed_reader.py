@@ -1,6 +1,7 @@
 """RSS / Atom feed reader tool for the OpenAI agent."""
 
 import json
+import sys
 from datetime import datetime
 from typing import Any
 from urllib.parse import urlparse
@@ -8,7 +9,7 @@ from urllib.parse import urlparse
 import feedparser
 import requests
 
-from config import RSS_FEEDS
+from config import RSS_FEEDS, matches_keywords
 from tools.base import BaseTool
 
 
@@ -128,8 +129,32 @@ class FeedReaderTool(BaseTool):
 
         valid_feeds = [url for url in feed_urls if self._validate_url(url)]
         all_articles: list[dict] = []
+        total = len(valid_feeds)
 
-        for url in valid_feeds:
+        for idx, url in enumerate(valid_feeds, 1):
+            domain = urlparse(url).netloc or url
+            print(
+                f"    \U0001f4e1 [{idx}/{total}] Reading {domain}",
+                file=sys.stderr,
+                flush=True,
+            )
             all_articles.extend(self._parse_feed(url))
 
-        return json.dumps(all_articles, ensure_ascii=False)
+        # Pre-filter: only keep articles that pass the mandatory
+        # REGION + PRIMARY/SECONDARY keyword gates.
+        filtered: list[dict] = []
+        for article in all_articles:
+            text = f"{article.get('title', '')} {article.get('summary', '')}"
+            passes, matched = matches_keywords(text)
+            if passes:
+                article["matched_keywords"] = matched
+                filtered.append(article)
+
+        print(
+            f"    \U0001f4f0 {len(filtered)} articles kept"
+            f" (of {len(all_articles)} total)",
+            file=sys.stderr,
+            flush=True,
+        )
+
+        return json.dumps(filtered, ensure_ascii=False)

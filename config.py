@@ -39,38 +39,53 @@ RSS_FEEDS = [
 ]
 
 # ---------------------------------------------------------------------------
+# Web pages to scrape (homepages, forum listings, directory pages)
+# ---------------------------------------------------------------------------
+SCRAPE_URLS = [
+    "https://torrentfreak.com/category/piracy/",
+    "https://torrentfreak.com/category/research/",
+    "https://torrentfreak.com/category/law-politics/",
+    "https://torrentfreak.com/category/lawsuits/",
+    "https://torrentfreak.com/category/anti-piracy/",
+    "https://torrentfreak.com/category/technology/",
+    "https://piracymonitor.org/newsfeed/",
+    "https://www.alliance4creativity.com/news/",    
+    "https://ipuntotv.com/",
+    "https://alianzaaudiovisual.net/noticias.php",
+    "https://dplnews.com/tag/pirateria/",
+    "https://www.forokeys.com/foro/viark-sat/",
+    "https://www.forokeys.com/foro/viark-sat-4k/",
+    "https://www.forokeys.com/foro/viark-combo/",
+    "https://www.forokeys.com/foro/viark-lil/",
+    "https://www.forokeys.com/foro/viark-lil-2/",
+    "https://www.forokeys.com/foro/viark-droi/",
+    "https://www.forokeys.com/foro/viark-drs/",
+    "https://www.forokeys.com/foro/viark-drs2/",
+    "https://www.forokeys.com/foro/qviart-dual-receptor-satelite-y-tdt-4k-uhd-linux-enigma2-android-9-0*/",
+    "https://ipuntotv.com/Notas%202/archivo_9.html",
+]
+
+# ---------------------------------------------------------------------------
 # PRIMARY keywords (must be present)
 # ---------------------------------------------------------------------------
 PRIMARY_KEYWORDS = [
+    "anti pirateria",
+    "anti piratería",
+    "anti-pirateria",
+    "anti-piratería",
     "antipirateria",
+    "antipiratería",
     "pirateria",
-    "piratería digital",
-    "piratería en línea",
-    "alianza contra la pirateria",
-    "pirateria audiovisual",
-    "pirateria online",
-    "contra servicios piratas",
-    "señales piratas",
-    "operativo antipirateria",
-    "bloqueo dinámico",
-    "bloqueo de sitios",
-    "bloqueos IP",
-    "bloqueo de plataformas",
+    "piratería",
+    "operativo",
+    "bloqueo",
     "cardsharing",
-    "IPTV pirata",
-    "red de IPTV",
-    "venta de decodificadores",
-    "Desbloqueo SKY",
+    "IPTV",
+    "decodificadores",
     "VIARK",
-    "Megacable",
-    "DirecTV",
-    "Cablevisión",
     "LaLiga Content Protection",
-    "javier tebas",
-    "jorge bacaloni",
-    "futbol pirata",
     "decodificador",
-    "receptor de señal",
+    "receptor",
     "señal robada",
     "piracy shield",
     "Blackhole",
@@ -82,51 +97,75 @@ PRIMARY_KEYWORDS = [
     "decomiso",
     "incautación",
     "ciberdelincuencia",
-    "streaming ilegal",
-    "contenido ilegal",
-    "difusión ilegal",
-    "sitio de streaming",
+    "streaming",
+    "ilegal",
     "sitio pirata",
     "combate a la ciberdelincuencia",
     "combate a la pirateria",
     "medida contra la pirateria",
     "Desmantelan red",
-    "lucha contra la piratería",
-    "derechos de contenido",
-    "páginas de streaming",
+    "derechos",
     "indecopi",
     "IMPI",
     "Gabriel Drouet",
     "Tebas",
+    "javier tebas",
+    "jorge bacaloni",
     "fraude audiovisual",
-    "Ley de Propiedad Intelectual",
+    "Ley",
     "copyright",
-    "derechos de autor",
-    "propiedad intelectual",
+    "firmware",
 ]
 
 # ---------------------------------------------------------------------------
 # SECONDARY keywords (must appear alongside a primary one)
 # ---------------------------------------------------------------------------
 SECONDARY_KEYWORDS = [
-    "streaming",
-    "IPTV",
-    "televisión",
-    "canales",
-    "señales",
-    "bloqueo",
-    "cierre",
-    "operativo",
+    "contra la",
+    "lucha contra la",
+    "de streaming",
+    "red de",
+    "de televisión",
+    "de canales",
+    "de señal",
+    "de operativo",
     "investigación",
     "delito",
     "ilegal",
     "pirata",
+    "digital",
+    "audiovisual",
+    "en línea",
+    "Online",
+    "de TV",
+    "operativo",
+    "dinámico",
+    "de sitios",
+    "de IP",
+    "de plataformas",
+    "venta de",
+    "Desbloqueo",
+    "SKY",
+    "Megacable",
+    "DirecTV",
+    "Cablevisión",
+    "de fútbol",
+    "de decodificadores",
+    "ilegal",
+    "sitio de",
+    "páginas de",
+    "de contenido",
+    "difusión",
+    "contenido",
+    "de autor",
+    "de Propiedad Intelectual",
 ]
 
 # ---------------------------------------------------------------------------
 # REGION keywords (article must mention a Latin-American region to be kept)
 # ---------------------------------------------------------------------------
 REGION_KEYWORDS = [
+    "VIARK",
     # -- Countries --
     "México",
     "Mexico",
@@ -202,6 +241,33 @@ GOOGLE_SEARCH_KEYWORDS = [
     "cardsharing",
     "VIARK",
 ]
+
+
+def matches_keywords(text: str) -> tuple[bool, list[str]]:
+    """Check whether *text* passes the mandatory keyword filters.
+
+    Returns ``(passes, matched_keywords)`` where *passes* is ``True``
+    only when **both** conditions are met:
+
+    1.  At least one **REGION** keyword is found (mandatory gate).
+    2.  At least one **PRIMARY** or **SECONDARY** keyword is also found.
+
+    This is the single source of truth for keyword filtering, used by
+    every tool so the logic stays consistent.
+    """
+    text_lower = text.lower()
+
+    region_hits = [kw for kw in REGION_KEYWORDS if kw.lower() in text_lower]
+    if not region_hits:
+        return False, []
+
+    primary_hits = [kw for kw in PRIMARY_KEYWORDS if kw.lower() in text_lower]
+    secondary_hits = [kw for kw in SECONDARY_KEYWORDS if kw.lower() in text_lower]
+
+    if not primary_hits and not secondary_hits:
+        return False, []
+
+    return True, primary_hits + secondary_hits + region_hits
 
 
 def validate_google_credentials() -> None:
