@@ -19,6 +19,7 @@ from config import (
     SECONDARY_KEYWORDS,
     validate_google_credentials,
     validate_openai_credentials,
+    validate_typesafe_credentials,
 )
 from tools.feed_reader import FeedReaderTool
 from tools.google_search import GoogleSearchTool
@@ -240,21 +241,66 @@ def _deduplicate(rows: list[dict]) -> list[dict]:
 
 
 # ------------------------------------------------------------------
+# JEV 
+# ------------------------------------------------------------------
+
+async def _jev_triage() -> None:
+    """"""
+    
+    # using jev (system one), build a state with the dict of unique rows.
+    # I need jev to answer the question:
+    # 2. How much is it related to Latin America?
+    # 3. Is it relevant to the anti-piracy content monitoring?
+
+    from typesafe_sdk import Choice, Noul, Score, TypeSafeClient
+
+    with TypeSafeClient() as client:
+        response = await client.system_one(
+            state={"document": "I was charged twice. Please fix this ASAP."},
+            questions={
+                "isAntiPiracy": Noul(instructions="Is this content about anti-piracy?"),
+                "region": Choice(
+                    instructions="What is the content's region?",
+                    criteria={"Mexico": None, "Latin America": None, "Other": None},
+                ),
+                "infrastructure": Score(
+                    instructions="What is the affected infrastructure of the piracy news. ?",
+                    criteria=["IPTV", "Conditional Access", "Saas", "TV Box", "Cable" , "Other"],
+                ),
+                "stream_content_type": Choice(
+                    instructions="What is the type of content?",
+                    criteria={"Movies": None, "TV Shows": None, "Sports": None, "Sky": None}
+                ),
+            },
+        )
+
+    print(response.nouls["isAntiPiracy"].noul)
+    print(response.choices["region"].choice)
+    print(response.choices["stream_content_type"].choice)
+    print(response.scores["infrastructure"].score)
+
+
+# ------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------
 
 def main() -> None:
     validate_google_credentials()
     validate_openai_credentials()
+    validate_typesafe_credentials()
 
-    # 1. Collect data deterministically from all three sources
+    # Collect data deterministically from all three sources
     all_rows: list[dict] = []
     all_rows.extend(_collect_feeds())
     all_rows.extend(_collect_google())
     all_rows.extend(_collect_scrapes())
 
-    # 2. De-duplicate and write to CSV
+    # De-duplicate and write to CSV
     unique_rows = _deduplicate(all_rows)
+
+
+    _jev_triage();
+
     _write_csv(unique_rows, CSV_PATH)
     print(
         f"\n\U0001f4be {len(unique_rows)} unique entries written to {CSV_PATH}"

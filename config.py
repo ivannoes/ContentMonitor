@@ -20,6 +20,12 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 # ---------------------------------------------------------------------------
+# TypeSafe
+# ---------------------------------------------------------------------------
+TYPESAFE_API_KEY = os.getenv("TYPESAFE_API_KEY", "")
+TYPESAFE_DEFAULT_MODEL = os.getenv("TYPESAFE_DEFAULT_MODEL", "")
+
+# ---------------------------------------------------------------------------
 # RSS feeds from Latin American media (cleaned and validated)
 # ---------------------------------------------------------------------------
 RSS_FEEDS = [
@@ -281,4 +287,11 @@ def validate_openai_credentials() -> None:
     """Exit early if OpenAI API key is missing."""
     if not OPENAI_API_KEY:
         print("Error: OPENAI_API_KEY is not configured in the .env file")
+        sys.exit(1)
+
+
+def validate_typesafe_credentials() -> None:
+    """Exit early if the TypeSafe API key is missing."""
+    if not TYPESAFE_API_KEY:
+        print("Error: TYPESAFE_API_KEY is not configured in the .env file")
         sys.exit(1)
