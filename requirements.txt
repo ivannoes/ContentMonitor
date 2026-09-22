@@ -4,4 +4,3 @@ google-api-python-client
 openai
 python-dotenv
 requests
-typesafe-sdk

@@ -9,17 +9,22 @@ import csv
 import io
 import json
 import sys
+import time
 from datetime import datetime
 
 from agent import ContentAgent
+import jev
 from config import (
     GOOGLE_SEARCH_KEYWORDS,
+    JEV_BATCH_SIZE,
+    JEV_DELAY_SEC,
+    JEV_MAX_SUMMARY_CHARS,
     PRIMARY_KEYWORDS,
     REGION_KEYWORDS,
     SECONDARY_KEYWORDS,
     validate_google_credentials,
+    validate_jev_credentials,
     validate_openai_credentials,
-    validate_typesafe_credentials,
 )
 from tools.feed_reader import FeedReaderTool
 from tools.google_search import GoogleSearchTool
@@ -37,6 +42,10 @@ CSV_COLUMNS = [
     "source",
     "matched_keywords",
     "tool",
+    "Es_Antipirateria",
+    "Infraestructura",
+    "Region",
+    "Tipo",
 ]
 
 # ------------------------------------------------------------------
@@ -241,43 +250,121 @@ def _deduplicate(rows: list[dict]) -> list[dict]:
 
 
 # ------------------------------------------------------------------
-# JEV 
+# JEV
 # ------------------------------------------------------------------
 
-async def _jev_triage() -> None:
-    """"""
-    
-    # using jev (system one), build a state with the dict of unique rows.
-    # I need jev to answer the question:
-    # 2. How much is it related to Latin America?
-    # 3. Is it relevant to the anti-piracy content monitoring?
+JEV_QUESTIONS = {
+    "isAntiPiracy": {
+        "type": "noul",
+        "instructions": "Is this content about anti-piracy?",
+    },
+    "region": {
+        "type": "choice",
+        "instructions": "How much is it related to Latin America?",
+        "criteria": {"Mexico": None, "Latin America": None, "Other": None},
+    },
+    "infrastructure": {
+        "type": "choice",
+        "instructions": "Which is the affected infrastructure of the piracy news?",
+        "criteria": {
+            "IPTV": None,
+            "Conditional Access": None,
+            "SaaS": None,
+            "TV Box": None,
+            "Cable": None,
+            "Other": None,
+        },
+    },
+    "stream_content_type": {
+        "type": "choice",
+        "instructions": "What is the type of content?",
+        "criteria": {
+            "Movies": None,
+            "TV Shows": None,
+            "Sports": None,
+            "Sky": None,
+        },
+    },
+}
 
-    from typesafe_sdk import Choice, Noul, Score, TypeSafeClient
 
-    with TypeSafeClient() as client:
-        response = await client.system_one(
-            state={"document": "I was charged twice. Please fix this ASAP."},
-            questions={
-                "isAntiPiracy": Noul(instructions="Is this content about anti-piracy?"),
-                "region": Choice(
-                    instructions="What is the content's region?",
-                    criteria={"Mexico": None, "Latin America": None, "Other": None},
-                ),
-                "infrastructure": Score(
-                    instructions="What is the affected infrastructure of the piracy news. ?",
-                    criteria=["IPTV", "Conditional Access", "Saas", "TV Box", "Cable" , "Other"],
-                ),
-                "stream_content_type": Choice(
-                    instructions="What is the type of content?",
-                    criteria={"Movies": None, "TV Shows": None, "Sports": None, "Sky": None}
-                ),
-            },
+def _compacted_state(row: dict) -> dict:
+    """Return a small state for one row: keep the useful fields, truncate summary."""
+    return {
+        "date": row.get("date", ""),
+        "url": row.get("url", ""),
+        "title": row.get("title", ""),
+        "source": row.get("source", ""),
+        "summary": row.get("summary", "")[:JEV_MAX_SUMMARY_CHARS],
+    }
+
+
+def _jev_triage(unique_rows: list[dict]) -> None:
+    """Evaluate unique rows with Jev (System One) and store the verdicts.
+
+    Rows are compacted (``JEV_MAX_SUMMARY_CHARS``) and grouped into batches
+    of ``JEV_BATCH_SIZE``; each batch is evaluated in its own HTTP call to
+    ``https://opencode.ai/zen/v1/systemone``.  Jev returns one verdict per
+    call for the whole batch, which is applied to every row in that batch
+    (``Es_Antipirateria``, ``Infraestructura``, ``Region``, ``Tipo``) so
+    ``_write_csv`` can persist it.  Failed batches leave those columns empty.
+    """
+    if not unique_rows:
+        return
+
+    states = [_compacted_state(row) for row in unique_rows]
+    n_batches = (len(states) + JEV_BATCH_SIZE - 1) // JEV_BATCH_SIZE
+    errors = 0
+
+    for i in range(0, len(states), JEV_BATCH_SIZE):
+        batch_states = states[i : i + JEV_BATCH_SIZE]
+        batch_rows = unique_rows[i : i + JEV_BATCH_SIZE]
+        idx = i // JEV_BATCH_SIZE + 1
+        print(
+            f"\r\U0001f50d JEV batch {idx}/{n_batches} "
+            f"({len(batch_states)} rows)...",
+            end="",
+            file=sys.stderr,
+            flush=True,
         )
+        try:
+            response = jev.evaluate(
+                state=batch_states, questions=JEV_QUESTIONS
+            )
+            answers = response["answers"]
+            verdict = {
+                "Es_Antipirateria": round(answers["isAntiPiracy"]["noul"], 2),
+                "Infraestructura": round(answers["infrastructure"]["score"], 2),
+                "Region": answers["region"]["choice"],
+                "Tipo": answers["stream_content_type"]["choice"],
+            }
+        except jev.JevError as exc:
+            errors += 1
+            verdict = {
+                "Es_Antipirateria": "",
+                "Infraestructura": "",
+                "Region": "",
+                "Tipo": "",
+            }
+            print(
+                f"\n  \u26a0 batch {idx}/{n_batches} failed: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
 
-    print(response.nouls["isAntiPiracy"].noul)
-    print(response.choices["region"].choice)
-    print(response.choices["stream_content_type"].choice)
-    print(response.scores["infrastructure"].score)
+        for row in batch_rows:
+            row.update(verdict)
+
+        if JEV_DELAY_SEC:
+            time.sleep(JEV_DELAY_SEC)
+    print(file=sys.stderr, flush=True)
+
+    if errors:
+        print(
+            f"  \u26a0 {errors} JEV batch call(s) failed.",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 # ------------------------------------------------------------------
@@ -287,7 +374,7 @@ async def _jev_triage() -> None:
 def main() -> None:
     validate_google_credentials()
     validate_openai_credentials()
-    validate_typesafe_credentials()
+    validate_jev_credentials()
 
     # Collect data deterministically from all three sources
     all_rows: list[dict] = []
@@ -298,8 +385,7 @@ def main() -> None:
     # De-duplicate and write to CSV
     unique_rows = _deduplicate(all_rows)
 
-
-    _jev_triage();
+    _jev_triage(unique_rows)
 
     _write_csv(unique_rows, CSV_PATH)
     print(

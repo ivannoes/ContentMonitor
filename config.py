@@ -20,10 +20,19 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 # ---------------------------------------------------------------------------
-# TypeSafe
+# Jev (System One) via OpenCode Zen
 # ---------------------------------------------------------------------------
-TYPESAFE_API_KEY = os.getenv("TYPESAFE_API_KEY", "")
-TYPESAFE_DEFAULT_MODEL = os.getenv("TYPESAFE_DEFAULT_MODEL", "")
+OPENCODE_API_KEY = os.getenv("OPENCODE_API_KEY", "")
+JEV_MODEL = os.getenv("JEV_MODEL", "jev-1.13-free")
+JEV_SYSTEM_ONE_URL = os.getenv(
+    "JEV_SYSTEM_ONE_URL", "https://opencode.ai/zen/v1/systemone"
+)
+# Truncate each row's summary before sending it as state.
+JEV_MAX_SUMMARY_CHARS = int(os.getenv("JEV_MAX_SUMMARY_CHARS", "300"))
+# Rows per HTTP call (fewer, larger calls = much faster).
+JEV_BATCH_SIZE = int(os.getenv("JEV_BATCH_SIZE", "100"))
+# Optional pause between calls (rate-limit safety).
+JEV_DELAY_SEC = float(os.getenv("JEV_DELAY_SEC", "0"))
 
 # ---------------------------------------------------------------------------
 # RSS feeds from Latin American media (cleaned and validated)
@@ -290,8 +299,8 @@ def validate_openai_credentials() -> None:
         sys.exit(1)
 
 
-def validate_typesafe_credentials() -> None:
-    """Exit early if the TypeSafe API key is missing."""
-    if not TYPESAFE_API_KEY:
-        print("Error: TYPESAFE_API_KEY is not configured in the .env file")
+def validate_jev_credentials() -> None:
+    """Exit early if the OpenCode Zen API key is missing."""
+    if not OPENCODE_API_KEY:
+        print("Error: OPENCODE_API_KEY is not configured in the .env file")
         sys.exit(1)
