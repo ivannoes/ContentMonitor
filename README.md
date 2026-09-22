@@ -32,14 +32,7 @@ The agent discovers the new tool automatically.
 ## Installation
 
 1. Clone the repository or download the folder.
-2. Create a virtual environment:
-   ```bash
-   python -m venv venv
-   ```
-3. Activate the virtual environment:
-   - Windows: `.\venv\Scripts\activate`
-   - Unix/macOS: `source venv/bin/activate`
-4. Install dependencies:
+2. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
@@ -54,13 +47,6 @@ GOOGLE_CSE_ID=your_google_cse_id
 OPENAI_API_KEY=your_openai_api_key
 OPENAI_MODEL=your_preferred_model
 ```
-
-| Variable | Purpose |
-|---|---|
-| `GOOGLE_API_KEY` | Google Custom Search JSON API key |
-| `GOOGLE_CSE_ID` | Google Custom Search Engine ID |
-| `OPENAI_API_KEY` | OpenAI API key for the agent |
-| `OPENAI_MODEL` | OpenAI model to use (e.g. `gpt-4o-mini`, `gpt-4o`) |
 
 ## Usage
 
