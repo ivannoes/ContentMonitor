@@ -491,6 +491,8 @@ def main() -> None:
     # 3. Send CSV content to the model for summarization
     csv_text = _read_csv_as_text(CSV_PATH)
     instructions = _build_summary_instructions()
+
+    #TODO: this is where the summarization happens, but the code adds complexity and an agent is not needed.  We can just call the model directly with the CSV text and instructions.
     agent = ContentAgent()
     answer = agent.summarize(csv_text, instructions=instructions)
 

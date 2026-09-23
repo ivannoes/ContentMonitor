@@ -87,27 +87,39 @@ SCRAPE_URLS = [
 ]
 
 # ---------------------------------------------------------------------------
-# PRIMARY keywords (source list, merged into FILTER_KEYWORDS below)
+# FILTER_KEYWORDS -- single source of truth for keywords, used by the JEV
+# relevance questions.  Anti-piracy and infrastructure terms only: Jev
+# matches by meaning, synonyms and context, and answers region questions
+# separately, so orthographic variants, region names and generic glue words
+# are collapsed/removed here.
 # ---------------------------------------------------------------------------
-_PRIMARY_KEYWORDS = [
-    "anti pirateria",
-    "anti piratería",
-    "anti-pirateria",
-    "anti-piratería",
-    "antipirateria",
-    "antipiratería",
-    "pirateria",
+FILTER_KEYWORDS = [
+    # -- Anti-piracy core --
     "piratería",
+    "pirateria",
     "operativo",
     "bloqueo",
     "cardsharing",
+    "streaming",
+    "sitio pirata",
+    "pirata",
+    "decomiso",
+    "ciberdelincuencia",
+    "fraude audiovisual",
+    "copyright",
+    "firmware",
+    # -- Infrastructure / product --
     "IPTV",
-    "decodificadores",
-    "VIARK",
-    "LaLiga Content Protection",
     "decodificador",
-    "receptor",
+    "VIARK",
     "señal robada",
+    "LaLiga Content Protection",
+    # -- Operators --
+    "SKY",
+    "Megacable",
+    "DirecTV",
+    "Cablevisión",
+    # -- Enforcement / people / entities --
     "piracy shield",
     "Blackhole",
     "Lumière",
@@ -115,165 +127,17 @@ _PRIMARY_KEYWORDS = [
     "Sentry",
     "Vento",
     "Sportian",
-    "decomiso",
-    "incautación",
-    "ciberdelincuencia",
-    "streaming",
-    "ilegal",
-    "sitio pirata",
-    "combate a la ciberdelincuencia",
-    "combate a la pirateria",
-    "medida contra la pirateria",
-    "Desmantelan red",
-    "derechos",
     "indecopi",
     "IMPI",
     "Gabriel Drouet",
     "Tebas",
-    "javier tebas",
     "jorge bacaloni",
-    "fraude audiovisual",
-    "Ley",
-    "copyright",
-    "firmware",
-]
-
-# ---------------------------------------------------------------------------
-# SECONDARY keywords (source list, merged into FILTER_KEYWORDS below)
-# ---------------------------------------------------------------------------
-_SECONDARY_KEYWORDS = [
-    "contra la",
-    "lucha contra la",
-    "de streaming",
-    "red de",
-    "de televisión",
-    "de canales",
-    "de señal",
-    "de operativo",
-    "investigación",
-    "delito",
-    "ilegal",
-    "pirata",
-    "digital",
-    "audiovisual",
-    "en línea",
-    "Online",
-    "de TV",
-    "operativo",
-    "dinámico",
-    "de sitios",
-    "de IP",
-    "de plataformas",
-    "venta de",
-    "Desbloqueo",
-    "SKY",
-    "Megacable",
-    "DirecTV",
-    "Cablevisión",
-    "de fútbol",
-    "de decodificadores",
-    "ilegal",
-    "sitio de",
-    "páginas de",
-    "de contenido",
-    "difusión",
-    "contenido",
-    "de autor",
-    "de Propiedad Intelectual",
-]
-
-# ---------------------------------------------------------------------------
-# REGION keywords (source list, merged into FILTER_KEYWORDS below)
-# ---------------------------------------------------------------------------
-_REGION_KEYWORDS = [
-    "VIARK",
-    # -- Countries --
-    "México",
-    "Mexico",
-    "Colombia",
-    "Argentina",
-    "Chile",
-    "Perú",
-    "Peru",
-    "Brasil",
-    "Brazil",
-    "Venezuela",
-    "Ecuador",
-    "Bolivia",
-    "Paraguay",
-    "Uruguay",
-    "Cuba",
-    "Costa Rica",
-    "Panamá",
-    "Guatemala",
-    "Honduras",
-    "El Salvador",
-    "Nicaragua",
-    "República Dominicana",
-    "Puerto Rico",
-    # -- Regions / Demonyms --
-    "América Latina",
-    "Latinoamérica",
-    "LATAM",
-    "Centroamérica",
-    "Sudamérica",
-    "Caribe",
-    "latinoamericano",
-    "latinoamericana",
-    # -- Major cities --
-    "Ciudad de México",
-    "CDMX",
-    "Bogotá",
-    "Buenos Aires",
-    "Santiago",
-    "Lima",
-    "São Paulo",
-    "Sao Paulo",
-    "Río de Janeiro",
-    "Caracas",
-    "Quito",
-    "Montevideo",
-    "Guadalajara",
-    "Monterrey",
-    "Medellín",
-    # -- Regional organizations & regulators --
-    "INDECOPI",
-    "IMPI",
-    "IFT",
-    "Megacable",
     "Televisa",
     "TV Azteca",
     "Claro",
     "Telmex",
-    "Mercosur",
     "Liga MX",
 ]
-
-# ---------------------------------------------------------------------------
-# FILTER_KEYWORDS -- single merged, deduplicated list used by the JEV
-# relevance questions.  Region, primary and secondary terms are no longer
-# treated as separate gates; they are one flat list that Jev evaluates
-# semantically.
-# ---------------------------------------------------------------------------
-
-def _merge_keywords(*lists: list[str]) -> list[str]:
-    """Merge keyword lists into one, keeping order and removing duplicates
-    case-insensitively."""
-    seen: set[str] = set()
-    merged: list[str] = []
-    for words in lists:
-        for word in words:
-            key = word.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            merged.append(word)
-    return merged
-
-
-FILTER_KEYWORDS = _merge_keywords(
-    _PRIMARY_KEYWORDS, _SECONDARY_KEYWORDS, _REGION_KEYWORDS
-)
 
 # ---------------------------------------------------------------------------
 # Google search keywords (subset of FILTER_KEYWORDS used for Google queries)
