@@ -29,8 +29,11 @@ JEV_SYSTEM_ONE_URL = os.getenv(
 )
 # Truncate each row's summary before sending it as state.
 JEV_MAX_SUMMARY_CHARS = int(os.getenv("JEV_MAX_SUMMARY_CHARS", "300"))
-# Rows per HTTP call (fewer, larger calls = much faster).
-JEV_BATCH_SIZE = int(os.getenv("JEV_BATCH_SIZE", "100"))
+# Only triage up to this many unique rows (keeps free-model token usage bounded).
+JEV_MAX_ROWS = int(os.getenv("JEV_MAX_ROWS", "100"))
+# A row is considered anti-piracy content when Jev's noul probability
+# is at least this value.
+JEV_ANTI_PIRACY_THRESHOLD = float(os.getenv("JEV_ANTI_PIRACY_THRESHOLD", "0.65"))
 # Optional pause between calls (rate-limit safety).
 JEV_DELAY_SEC = float(os.getenv("JEV_DELAY_SEC", "0"))
 

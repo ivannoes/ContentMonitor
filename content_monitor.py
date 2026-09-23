@@ -16,8 +16,9 @@ from agent import ContentAgent
 import jev
 from config import (
     GOOGLE_SEARCH_KEYWORDS,
-    JEV_BATCH_SIZE,
+    JEV_ANTI_PIRACY_THRESHOLD,
     JEV_DELAY_SEC,
+    JEV_MAX_ROWS,
     JEV_MAX_SUMMARY_CHARS,
     PRIMARY_KEYWORDS,
     REGION_KEYWORDS,
@@ -253,11 +254,12 @@ def _deduplicate(rows: list[dict]) -> list[dict]:
 # JEV
 # ------------------------------------------------------------------
 
-JEV_QUESTIONS = {
-    "isAntiPiracy": {
-        "type": "noul",
-        "instructions": "Is this content about anti-piracy?",
-    },
+JEV_ANTI_PIRACY_QUESTION = {
+    "type": "noul",
+    "instructions": "Is this content about anti-piracy?",
+}
+
+JEV_TRIAGE_QUESTIONS = {
     "region": {
         "type": "choice",
         "instructions": "How much is it related to Latin America?",
@@ -299,72 +301,121 @@ def _compacted_state(row: dict) -> dict:
     }
 
 
-def _jev_triage(unique_rows: list[dict]) -> None:
-    """Evaluate unique rows with Jev (System One) and store the verdicts.
+def _empty_verdict() -> dict:
+    """Return a verdict with empty columns (used when a Jev call fails)."""
+    return {
+        "Es_Antipirateria": "",
+        "Infraestructura": "",
+        "Region": "",
+        "Tipo": "",
+    }
 
-    Rows are compacted (``JEV_MAX_SUMMARY_CHARS``) and grouped into batches
-    of ``JEV_BATCH_SIZE``; each batch is evaluated in its own HTTP call to
-    ``https://opencode.ai/zen/v1/systemone``.  Jev returns one verdict per
-    call for the whole batch, which is applied to every row in that batch
-    (``Es_Antipirateria``, ``Infraestructura``, ``Region``, ``Tipo``) so
-    ``_write_csv`` can persist it.  Failed batches leave those columns empty.
+
+def _jev_delay() -> None:
+    """Pause between calls when a delay is configured."""
+    if JEV_DELAY_SEC:
+        time.sleep(JEV_DELAY_SEC)
+
+
+def _is_anti_piracy(state: dict) -> float:
+    """Ask Jev only the anti-piracy question and return its ``noul`` probability."""
+    response = jev.evaluate(
+        state=state, questions={"isAntiPiracy": JEV_ANTI_PIRACY_QUESTION}
+    )
+    noul = response["answers"]["isAntiPiracy"]["noul"]
+    if not isinstance(noul, (int, float)):
+        raise jev.JevError(f"unexpected isAntiPiracy answer: {noul!r}")
+    return float(noul)
+
+
+def _run_triage(state: dict) -> dict:
+    """Ask Jev the remaining questions for one already-kept row."""
+    response = jev.evaluate(state=state, questions=JEV_TRIAGE_QUESTIONS)
+    answers = response["answers"]
+    return {
+        "Infraestructura": answers["infrastructure"]["choice"],
+        "Region": answers["region"]["choice"],
+        "Tipo": answers["stream_content_type"]["choice"],
+    }
+
+
+def _jev_triage(unique_rows: list[dict]) -> list[dict]:
+    """Evaluate each row with Jev (System One), row by row, and keep only
+    the anti-piracy ones.
+
+    Two-phase evaluation:
+
+    1.  Each row is first sent only the ``isAntiPiracy`` question.  Rows
+        whose ``noul`` probability is below ``JEV_ANTI_PIRACY_THRESHOLD`` are
+        discarded (not written to the CSV).
+    2.  Rows that pass get the remaining questions (``region``,
+        ``infrastructure``, ``stream_content_type``); their verdicts are
+        stored in ``Region``/``Infraestructura``/``Tipo`` and the ``noul``
+        value in ``Es_Antipirateria`` so ``_write_csv`` can persist them.
+        A failed call leaves those four columns empty but keeps the row.
     """
-    if not unique_rows:
-        return
-
-    states = [_compacted_state(row) for row in unique_rows]
-    n_batches = (len(states) + JEV_BATCH_SIZE - 1) // JEV_BATCH_SIZE
+    kept: list[dict] = []
+    discarded = 0
     errors = 0
 
-    for i in range(0, len(states), JEV_BATCH_SIZE):
-        batch_states = states[i : i + JEV_BATCH_SIZE]
-        batch_rows = unique_rows[i : i + JEV_BATCH_SIZE]
-        idx = i // JEV_BATCH_SIZE + 1
+    for idx, row in enumerate(unique_rows, 1):
+        state = _compacted_state(row)
         print(
-            f"\r\U0001f50d JEV batch {idx}/{n_batches} "
-            f"({len(batch_states)} rows)...",
+            f"\r\U0001f50d JEV row {idx}/{len(unique_rows)}...",
             end="",
             file=sys.stderr,
             flush=True,
         )
         try:
-            response = jev.evaluate(
-                state=batch_states, questions=JEV_QUESTIONS
-            )
-            answers = response["answers"]
-            verdict = {
-                "Es_Antipirateria": round(answers["isAntiPiracy"]["noul"], 2),
-                "Infraestructura": round(answers["infrastructure"]["score"], 2),
-                "Region": answers["region"]["choice"],
-                "Tipo": answers["stream_content_type"]["choice"],
-            }
-        except jev.JevError as exc:
+            noul = _is_anti_piracy(state)
+        except (jev.JevError, KeyError, TypeError) as exc:
             errors += 1
-            verdict = {
-                "Es_Antipirateria": "",
-                "Infraestructura": "",
-                "Region": "",
-                "Tipo": "",
-            }
             print(
-                f"\n  \u26a0 batch {idx}/{n_batches} failed: {exc}",
+                f"\n  \u26a0 row {idx} anti-piracy check failed: {exc}",
                 file=sys.stderr,
                 flush=True,
             )
+            row.update(_empty_verdict())
+            kept.append(row)
+            _jev_delay()
+            continue
 
-        for row in batch_rows:
-            row.update(verdict)
+        if noul < JEV_ANTI_PIRACY_THRESHOLD:
+            discarded += 1
+            _jev_delay()
+            continue
 
-        if JEV_DELAY_SEC:
-            time.sleep(JEV_DELAY_SEC)
+        try:
+            verdict = _run_triage(state)
+        except (jev.JevError, KeyError, TypeError) as exc:
+            errors += 1
+            print(
+                f"\n  \u26a0 row {idx} triage failed: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            verdict = _empty_verdict()
+
+        verdict["Es_Antipirateria"] = round(noul, 2)
+        row.update(verdict)
+        kept.append(row)
+        _jev_delay()
+
     print(file=sys.stderr, flush=True)
 
-    if errors:
+    if discarded:
         print(
-            f"  \u26a0 {errors} JEV batch call(s) failed.",
+            f"  \u26a0 {discarded} row(s) discarded (below anti-piracy threshold).",
             file=sys.stderr,
             flush=True,
         )
+    if errors:
+        print(
+            f"  \u26a0 {errors} Jev call(s) failed.",
+            file=sys.stderr,
+            flush=True,
+        )
+    return kept
 
 
 # ------------------------------------------------------------------
@@ -382,15 +433,25 @@ def main() -> None:
     all_rows.extend(_collect_google())
     all_rows.extend(_collect_scrapes())
 
-    # De-duplicate and write to CSV
+    # De-duplicate, run JEV triage (capped), and write the relevant rows to CSV
     unique_rows = _deduplicate(all_rows)
+    triaged = unique_rows[:JEV_MAX_ROWS]
+    skipped = len(unique_rows) - len(triaged)
+    kept_rows = _jev_triage(triaged)
 
-    _jev_triage(unique_rows)
+    if skipped:
+        print(
+            f"  \u26a0 {skipped} row(s) skipped: JEV triage capped at"
+            f" {JEV_MAX_ROWS} rows.",
+            file=sys.stderr,
+            flush=True,
+        )
 
-    _write_csv(unique_rows, CSV_PATH)
+    _write_csv(kept_rows, CSV_PATH)
     print(
-        f"\n\U0001f4be {len(unique_rows)} unique entries written to {CSV_PATH}"
-        f" ({len(all_rows) - len(unique_rows)} duplicates removed)",
+        f"\n\U0001f4be {len(kept_rows)} relevant entries written to {CSV_PATH}"
+        f" ({len(all_rows) - len(kept_rows)} removed:"
+        f" duplicates + non-anti-piracy + skipped)",
         file=sys.stderr,
         flush=True,
     )

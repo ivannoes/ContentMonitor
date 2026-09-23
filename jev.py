@@ -43,25 +43,30 @@ def evaluate(state: Any, questions: dict[str, dict]) -> dict:
     Raises
     ------
     JevError
-        If the request fails or the server returns a non-2xx status.
+        If the request fails (auth, network, HTTP error) or the server
+        returns a non-JSON body.
     """
-    resp = requests.post(
-        JEV_SYSTEM_ONE_URL,
-        headers={
-            "Authorization": f"Bearer {OPENCODE_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": JEV_MODEL,
-            "state": state,
-            "questions": questions,
-        },
-        timeout=60,
-    )
     try:
+        resp = requests.post(
+            JEV_SYSTEM_ONE_URL,
+            headers={
+                "Authorization": f"Bearer {OPENCODE_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": JEV_MODEL,
+                "state": state,
+                "questions": questions,
+            },
+            timeout=60,
+        )
         resp.raise_for_status()
-    except requests.HTTPError as exc:
-        raise JevError(
-            f"Jev request failed ({resp.status_code}): {resp.text}"
-        ) from exc
-    return resp.json()
+    except requests.RequestException as exc:
+        detail = ""
+        if exc.response is not None:
+            detail = f": {exc.response.text}"
+        raise JevError(f"Jev request failed: {exc}{detail}") from exc
+    try:
+        return resp.json()
+    except ValueError as exc:
+        raise JevError(f"Jev returned a non-JSON response: {exc}") from exc
