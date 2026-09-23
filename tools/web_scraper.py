@@ -1,9 +1,8 @@
 """Web page scraper tool for the OpenAI agent.
 
 Scrapes web pages (homepages, forum listings, directory pages) to extract
-link entries and their surrounding text.  Each entry is checked against the
-configured keyword lists (PRIMARY, SECONDARY, REGION) so the agent receives
-only relevant items.
+link entries and their surrounding text.  Every entry is passed through
+unchanged; relevance filtering is decided later by Jev, not in this tool.
 
 Pages that require authentication, CAPTCHA solving, or that are otherwise
 inaccessible are skipped and reported in the output so the agent is always
@@ -19,7 +18,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-from config import SCRAPE_URLS, matches_keywords
+from config import SCRAPE_URLS
 from tools.base import BaseTool
 
 # ---------------------------------------------------------------------------
@@ -70,14 +69,13 @@ class WebScraperTool(BaseTool):
             "description": (
                 "Scrape one or more web pages (homepages, forum listings, "
                 "directory pages) to extract link entries and their "
-                "surrounding text. Each entry is filtered against the "
-                "configured keyword lists (primary, secondary, and region). "
+                "surrounding text. "
                 "If no URLs are provided, the default curated list "
                 "configured in the application is used. "
                 "Returns a JSON object with two keys: 'results' (list of "
-                "matching entries with url, text, matched_keywords, and "
-                "source_page) and 'skipped' (list of pages that could not "
-                "be accessed, with the URL and the reason)."
+                "entries with url, text, and source_page) and 'skipped' "
+                "(list of pages that could not be accessed, with the URL "
+                "and the reason)."
             ),
             "parameters": {
                 "type": "object",
@@ -215,29 +213,24 @@ class WebScraperTool(BaseTool):
         return entries
 
     # ------------------------------------------------------------------
-    # Helpers — keyword filtering
+    # Helpers — entry shaping
     # ------------------------------------------------------------------
 
-    def _filter_entries(
-        self, entries: list[dict], source_url: str
-    ) -> list[dict]:
-        """Keep only entries whose text passes the shared keyword filter
-        (mandatory REGION gate + at least one PRIMARY or SECONDARY keyword).
-        """
-        filtered: list[dict] = []
-        for entry in entries:
-            passes, matched = matches_keywords(entry["text"])
-            if passes:
-                filtered.append(
-                    {
-                        "url": entry["url"],
-                        "text": entry["text"][:500],  # trim long text
-                        "matched_keywords": matched,
-                        "source_page": source_url,
-                    }
-                )
+    @staticmethod
+    def _shape_entries(entries: list[dict], source_url: str) -> list[dict]:
+        """Attach the source page and trim long text for every entry.
 
-        return filtered
+        No keyword filter is applied here: every entry is passed through so
+        Jev decides relevance later in a single consolidated evaluation.
+        """
+        return [
+            {
+                "url": entry["url"],
+                "text": entry["text"][:500],  # trim long text
+                "source_page": source_url,
+            }
+            for entry in entries
+        ]
 
     # ------------------------------------------------------------------
     # BaseTool.execute
@@ -274,10 +267,10 @@ class WebScraperTool(BaseTool):
                 skipped.append({"url": url, "reason": skip_reason})
                 continue
 
-            # Extract and filter entries
+            # Extract and shape entries (no keyword filter here)
             entries = self._extract_entries(html, url)  # type: ignore[arg-type]
-            filtered = self._filter_entries(entries, url)
-            results.extend(filtered)
+            shaped = self._shape_entries(entries, url)
+            results.extend(shaped)
 
         print(
             f"    \U0001f4cb {len(results)} entries kept, {len(skipped)} pages skipped",

@@ -34,8 +34,11 @@ JEV_MAX_ROWS = int(os.getenv("JEV_MAX_ROWS", "100"))
 # A row is considered anti-piracy content when Jev's noul probability
 # is at least this value.
 JEV_ANTI_PIRACY_THRESHOLD = float(os.getenv("JEV_ANTI_PIRACY_THRESHOLD", "0.65"))
+# A row must score at least this high on the keyword-relevance question
+# to be triaged.
+JEV_KEYWORD_THRESHOLD = float(os.getenv("JEV_KEYWORD_THRESHOLD", "0.65"))
 # Optional pause between calls (rate-limit safety).
-JEV_DELAY_SEC = float(os.getenv("JEV_DELAY_SEC", "0"))
+JEV_DELAY_SEC = float(os.getenv("JEV_DELAY_SEC", "1.7"))
 
 # ---------------------------------------------------------------------------
 # RSS feeds from Latin American media (cleaned and validated)
@@ -84,9 +87,9 @@ SCRAPE_URLS = [
 ]
 
 # ---------------------------------------------------------------------------
-# PRIMARY keywords (must be present)
+# PRIMARY keywords (source list, merged into FILTER_KEYWORDS below)
 # ---------------------------------------------------------------------------
-PRIMARY_KEYWORDS = [
+_PRIMARY_KEYWORDS = [
     "anti pirateria",
     "anti piratería",
     "anti-pirateria",
@@ -136,9 +139,9 @@ PRIMARY_KEYWORDS = [
 ]
 
 # ---------------------------------------------------------------------------
-# SECONDARY keywords (must appear alongside a primary one)
+# SECONDARY keywords (source list, merged into FILTER_KEYWORDS below)
 # ---------------------------------------------------------------------------
-SECONDARY_KEYWORDS = [
+_SECONDARY_KEYWORDS = [
     "contra la",
     "lucha contra la",
     "de streaming",
@@ -180,9 +183,9 @@ SECONDARY_KEYWORDS = [
 ]
 
 # ---------------------------------------------------------------------------
-# REGION keywords (article must mention a Latin-American region to be kept)
+# REGION keywords (source list, merged into FILTER_KEYWORDS below)
 # ---------------------------------------------------------------------------
-REGION_KEYWORDS = [
+_REGION_KEYWORDS = [
     "VIARK",
     # -- Countries --
     "México",
@@ -247,7 +250,33 @@ REGION_KEYWORDS = [
 ]
 
 # ---------------------------------------------------------------------------
-# Google search keywords (subset of primary keywords used for Google queries)
+# FILTER_KEYWORDS -- single merged, deduplicated list used by the JEV
+# relevance questions.  Region, primary and secondary terms are no longer
+# treated as separate gates; they are one flat list that Jev evaluates
+# semantically.
+# ---------------------------------------------------------------------------
+
+def _merge_keywords(*lists: list[str]) -> list[str]:
+    """Merge keyword lists into one, keeping order and removing duplicates
+    case-insensitively."""
+    seen: set[str] = set()
+    merged: list[str] = []
+    for words in lists:
+        for word in words:
+            key = word.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(word)
+    return merged
+
+
+FILTER_KEYWORDS = _merge_keywords(
+    _PRIMARY_KEYWORDS, _SECONDARY_KEYWORDS, _REGION_KEYWORDS
+)
+
+# ---------------------------------------------------------------------------
+# Google search keywords (subset of FILTER_KEYWORDS used for Google queries)
 # ---------------------------------------------------------------------------
 GOOGLE_SEARCH_KEYWORDS = [
     "antipirateria",
@@ -261,31 +290,15 @@ GOOGLE_SEARCH_KEYWORDS = [
 ]
 
 
-def matches_keywords(text: str) -> tuple[bool, list[str]]:
-    """Check whether *text* passes the mandatory keyword filters.
+def find_keyword_matches(text: str) -> list[str]:
+    """Return the keywords from ``FILTER_KEYWORDS`` that appear literally in
+    *text* (case-insensitive).
 
-    Returns ``(passes, matched_keywords)`` where *passes* is ``True``
-    only when **both** conditions are met:
-
-    1.  At least one **REGION** keyword is found (mandatory gate).
-    2.  At least one **PRIMARY** or **SECONDARY** keyword is also found.
-
-    This is the single source of truth for keyword filtering, used by
-    every tool so the logic stays consistent.
+    This is only used to fill the ``matched_keywords`` CSV column for
+    traceability.  Relevance filtering itself is decided by Jev, not here.
     """
     text_lower = text.lower()
-
-    region_hits = [kw for kw in REGION_KEYWORDS if kw.lower() in text_lower]
-    if not region_hits:
-        return False, []
-
-    primary_hits = [kw for kw in PRIMARY_KEYWORDS if kw.lower() in text_lower]
-    secondary_hits = [kw for kw in SECONDARY_KEYWORDS if kw.lower() in text_lower]
-
-    if not primary_hits and not secondary_hits:
-        return False, []
-
-    return True, primary_hits + secondary_hits + region_hits
+    return [kw for kw in FILTER_KEYWORDS if kw.lower() in text_lower]
 
 
 def validate_google_credentials() -> None:

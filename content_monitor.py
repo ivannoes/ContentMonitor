@@ -15,14 +15,14 @@ from datetime import datetime
 from agent import ContentAgent
 import jev
 from config import (
+    FILTER_KEYWORDS,
     GOOGLE_SEARCH_KEYWORDS,
     JEV_ANTI_PIRACY_THRESHOLD,
     JEV_DELAY_SEC,
+    JEV_KEYWORD_THRESHOLD,
     JEV_MAX_ROWS,
     JEV_MAX_SUMMARY_CHARS,
-    PRIMARY_KEYWORDS,
-    REGION_KEYWORDS,
-    SECONDARY_KEYWORDS,
+    find_keyword_matches,
     validate_google_credentials,
     validate_jev_credentials,
     validate_openai_credentials,
@@ -56,24 +56,20 @@ SUMMARY_INSTRUCTIONS = """\
 You are an anti-piracy content monitoring assistant.
 
 You will receive the contents of a CSV file with articles collected from
-RSS feeds, Google searches, and scraped web pages.  Every article has
-already been pre-filtered through keyword and region filters.
-Apply a second pass: discard any article that is NOT relevant to the
-keyword and region criteria listed below.
+RSS feeds, Google searches, and scraped web pages.  Each row was evaluated
+by the Jev model, which decided relevance and stored its verdict in the
+triage columns (Es_Antipirateria, Infraestructura, Region, Tipo).
 
-REGION keywords (article MUST mention at least one):
-  {region_keywords}
+Rows whose triage columns are all empty failed the relevance filters
+and are kept in the CSV ONLY for manual false-negative review.  Never
+include those rows in your report.
 
-PRIMARY keywords (preferred):
-  {primary_keywords}
-
-SECONDARY keywords (supporting):
-  {secondary_keywords}
+FILTER keywords used for relevance:
+  {filter_keywords}
 
 Your job is to:
-  1.  Remove duplicate articles (same URL or same headline).
-  2.  Discard any article whose title and summary do not mention at least
-      one REGION keyword.
+  1.  Consider only rows with non-empty triage columns.
+  2.  Remove duplicate articles (same URL or same headline).
   3.  Return a **numbered list** of the remaining articles with:
       - Title
       - URL
@@ -86,11 +82,9 @@ Your job is to:
 
 
 def _build_summary_instructions() -> str:
-    """Build the summarization prompt with the configured keyword lists."""
+    """Build the summarization prompt with the configured keyword list."""
     return SUMMARY_INSTRUCTIONS.format(
-        region_keywords=", ".join(REGION_KEYWORDS),
-        primary_keywords=", ".join(PRIMARY_KEYWORDS),
-        secondary_keywords=", ".join(SECONDARY_KEYWORDS),
+        filter_keywords=", ".join(FILTER_KEYWORDS),
     )
 
 
@@ -259,6 +253,14 @@ JEV_ANTI_PIRACY_QUESTION = {
     "instructions": "Is this content about anti-piracy?",
 }
 
+JEV_KEYWORD_QUESTION = {
+    "type": "noul",
+    "instructions": (
+        "Is this content relevant to at least one keyword in `keywords`? "
+        "Match by meaning, synonyms and context, not only literal text."
+    ),
+}
+
 JEV_TRIAGE_QUESTIONS = {
     "region": {
         "type": "choice",
@@ -289,10 +291,23 @@ JEV_TRIAGE_QUESTIONS = {
     },
 }
 
+# All questions asked in a single Jev call per row.  Jev evaluates them in
+# parallel over the same state, so one request produces both the relevance
+# filters and the triage verdict (no duplicated calls, lower token use).
+JEV_QUESTIONS = {
+    "isAntiPiracy": JEV_ANTI_PIRACY_QUESTION,
+    "keywordRelevance": JEV_KEYWORD_QUESTION,
+    "infrastructure": JEV_TRIAGE_QUESTIONS["infrastructure"],
+    "region": JEV_TRIAGE_QUESTIONS["region"],
+    "stream_content_type": JEV_TRIAGE_QUESTIONS["stream_content_type"],
+}
+
 
 def _compacted_state(row: dict) -> dict:
-    """Return a small state for one row: keep the useful fields, truncate summary."""
+    """Return a small state for one row: keep the useful fields, truncate
+    summary, and attach the configured keywords once per request."""
     return {
+        "keywords": FILTER_KEYWORDS,
         "date": row.get("date", ""),
         "url": row.get("url", ""),
         "title": row.get("title", ""),
@@ -302,7 +317,8 @@ def _compacted_state(row: dict) -> dict:
 
 
 def _empty_verdict() -> dict:
-    """Return a verdict with empty columns (used when a Jev call fails)."""
+    """Return a verdict with empty columns (used for rows that fail the Jev
+    filters, so they stay in the CSV for false-negative review)."""
     return {
         "Es_Antipirateria": "",
         "Infraestructura": "",
@@ -317,22 +333,26 @@ def _jev_delay() -> None:
         time.sleep(JEV_DELAY_SEC)
 
 
-def _is_anti_piracy(state: dict) -> float:
-    """Ask Jev only the anti-piracy question and return its ``noul`` probability."""
-    response = jev.evaluate(
-        state=state, questions={"isAntiPiracy": JEV_ANTI_PIRACY_QUESTION}
-    )
-    noul = response["answers"]["isAntiPiracy"]["noul"]
+def _evaluate_row(state: dict) -> dict:
+    """Ask Jev every question for one row in a single call.
+
+    Returns ``noul`` (anti-piracy signal), ``keyword_noul`` (relevance
+    signal) and the three triage choices, or raises on a bad answer.
+    """
+    response = jev.evaluate(state=state, questions=JEV_QUESTIONS)
+    answers = response["answers"]
+
+    noul = answers["isAntiPiracy"]["noul"]
     if not isinstance(noul, (int, float)):
         raise jev.JevError(f"unexpected isAntiPiracy answer: {noul!r}")
-    return float(noul)
 
+    keyword_noul = answers["keywordRelevance"]["noul"]
+    if not isinstance(keyword_noul, (int, float)):
+        raise jev.JevError(f"unexpected keywordRelevance answer: {keyword_noul!r}")
 
-def _run_triage(state: dict) -> dict:
-    """Ask Jev the remaining questions for one already-kept row."""
-    response = jev.evaluate(state=state, questions=JEV_TRIAGE_QUESTIONS)
-    answers = response["answers"]
     return {
+        "noul": float(noul),
+        "keyword_noul": float(keyword_noul),
         "Infraestructura": answers["infrastructure"]["choice"],
         "Region": answers["region"]["choice"],
         "Tipo": answers["stream_content_type"]["choice"],
@@ -340,22 +360,25 @@ def _run_triage(state: dict) -> dict:
 
 
 def _jev_triage(unique_rows: list[dict]) -> list[dict]:
-    """Evaluate each row with Jev (System One), row by row, and keep only
-    the anti-piracy ones.
+    """Evaluate each row with Jev (System One), row by row, in one call.
 
-    Two-phase evaluation:
+    For every row a single request asks the anti-piracy question, the
+    keyword-relevance question and the triage questions together.
 
-    1.  Each row is first sent only the ``isAntiPiracy`` question.  Rows
-        whose ``noul`` probability is below ``JEV_ANTI_PIRACY_THRESHOLD`` are
-        discarded (not written to the CSV).
-    2.  Rows that pass get the remaining questions (``region``,
-        ``infrastructure``, ``stream_content_type``); their verdicts are
-        stored in ``Region``/``Infraestructura``/``Tipo`` and the ``noul``
-        value in ``Es_Antipirateria`` so ``_write_csv`` can persist them.
-        A failed call leaves those four columns empty but keeps the row.
+    A row is triaged only when ALL of these hold:
+
+    - ``isAntiPiracy >= JEV_ANTI_PIRACY_THRESHOLD``
+    - ``keywordRelevance >= JEV_KEYWORD_THRESHOLD``
+    - ``Region`` is not ``"Other"``
+
+    Rows that fail any of them are written to the CSV with the four triage
+    columns empty so they can be reviewed later as potential false
+    negatives.  ``matched_keywords`` is filled from literal keyword hits in
+    the local text (traceability only; Jev is the one deciding relevance).
+    A failed Jev call also keeps the row with empty columns.
     """
     kept: list[dict] = []
-    discarded = 0
+    untriaged = 0
     errors = 0
 
     for idx, row in enumerate(unique_rows, 1):
@@ -366,12 +389,19 @@ def _jev_triage(unique_rows: list[dict]) -> list[dict]:
             file=sys.stderr,
             flush=True,
         )
+
+        row["matched_keywords"] = ", ".join(
+            find_keyword_matches(
+                f"{row.get('title', '')} {row.get('summary', '')}"
+            )
+        )
+
         try:
-            noul = _is_anti_piracy(state)
+            result = _evaluate_row(state)
         except (jev.JevError, KeyError, TypeError) as exc:
             errors += 1
             print(
-                f"\n  \u26a0 row {idx} anti-piracy check failed: {exc}",
+                f"\n  \u26a0 row {idx} Jev evaluation failed: {exc}",
                 file=sys.stderr,
                 flush=True,
             )
@@ -380,32 +410,34 @@ def _jev_triage(unique_rows: list[dict]) -> list[dict]:
             _jev_delay()
             continue
 
-        if noul < JEV_ANTI_PIRACY_THRESHOLD:
-            discarded += 1
+        passes = (
+            result["noul"] >= JEV_ANTI_PIRACY_THRESHOLD
+            and result["keyword_noul"] >= JEV_KEYWORD_THRESHOLD
+            and result["Region"] != "Other"
+        )
+        if not passes:
+            untriaged += 1
+            row.update(_empty_verdict())
+            kept.append(row)
             _jev_delay()
             continue
 
-        try:
-            verdict = _run_triage(state)
-        except (jev.JevError, KeyError, TypeError) as exc:
-            errors += 1
-            print(
-                f"\n  \u26a0 row {idx} triage failed: {exc}",
-                file=sys.stderr,
-                flush=True,
-            )
-            verdict = _empty_verdict()
-
-        verdict["Es_Antipirateria"] = round(noul, 2)
+        verdict = {
+            "Es_Antipirateria": round(result["noul"], 2),
+            "Infraestructura": result["Infraestructura"],
+            "Region": result["Region"],
+            "Tipo": result["Tipo"],
+        }
         row.update(verdict)
         kept.append(row)
         _jev_delay()
 
     print(file=sys.stderr, flush=True)
 
-    if discarded:
+    if untriaged:
         print(
-            f"  \u26a0 {discarded} row(s) discarded (below anti-piracy threshold).",
+            f"  \u26a0 {untriaged} row(s) kept without triage"
+            " (failed Jev relevance filters).",
             file=sys.stderr,
             flush=True,
         )
@@ -449,9 +481,9 @@ def main() -> None:
 
     _write_csv(kept_rows, CSV_PATH)
     print(
-        f"\n\U0001f4be {len(kept_rows)} relevant entries written to {CSV_PATH}"
+        f"\n\U0001f4be {len(kept_rows)} entries written to {CSV_PATH}"
         f" ({len(all_rows) - len(kept_rows)} removed:"
-        f" duplicates + non-anti-piracy + skipped)",
+        f" duplicates + skipped)",
         file=sys.stderr,
         flush=True,
     )

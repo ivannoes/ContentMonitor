@@ -6,7 +6,7 @@ from typing import Any
 
 from googleapiclient.discovery import build
 
-from config import GOOGLE_API_KEY, GOOGLE_CSE_ID, matches_keywords
+from config import GOOGLE_API_KEY, GOOGLE_CSE_ID
 from tools.base import BaseTool
 
 
@@ -57,7 +57,7 @@ class GoogleSearchTool(BaseTool):
 
     def execute(self, **kwargs: Any) -> str:
         query: str = kwargs["query"]
-        num_results: int = kwargs.get("num_results", 5)
+        num_results: int = kwargs.get("num_results", 2)
         date_restrict: str = kwargs.get("date_restrict", "w1")
 
         print(
@@ -88,17 +88,9 @@ class GoogleSearchTool(BaseTool):
                 for item in items
             ]
 
-            # Pre-filter: only keep results that pass the mandatory
-            # REGION + PRIMARY/SECONDARY keyword gates.
-            filtered: list[dict] = []
-            for result in results:
-                text = f"{result.get('title', '')} {result.get('snippet', '')}"
-                passes, matched = matches_keywords(text)
-                if passes:
-                    result["matched_keywords"] = matched
-                    filtered.append(result)
-
-            return json.dumps(filtered, ensure_ascii=False)
+            # No keyword pre-filter here: every result is passed through so
+            # Jev decides relevance later (single consolidated evaluation).
+            return json.dumps(results, ensure_ascii=False)
         except Exception as exc:
             print(
                 f"    \u26a0 Search error: {exc}",

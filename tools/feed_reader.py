@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import feedparser
 import requests
 
-from config import RSS_FEEDS, matches_keywords
+from config import RSS_FEEDS
 from tools.base import BaseTool
 
 
@@ -140,21 +140,13 @@ class FeedReaderTool(BaseTool):
             )
             all_articles.extend(self._parse_feed(url))
 
-        # Pre-filter: only keep articles that pass the mandatory
-        # REGION + PRIMARY/SECONDARY keyword gates.
-        filtered: list[dict] = []
-        for article in all_articles:
-            text = f"{article.get('title', '')} {article.get('summary', '')}"
-            passes, matched = matches_keywords(text)
-            if passes:
-                article["matched_keywords"] = matched
-                filtered.append(article)
-
+        # No keyword pre-filter here: every article is passed through so Jev
+        # decides relevance later (single consolidated evaluation).
         print(
-            f"    \U0001f4f0 {len(filtered)} articles kept"
+            f"    \U0001f4f0 {len(all_articles)} articles collected"
             f" (of {len(all_articles)} total)",
             file=sys.stderr,
             flush=True,
         )
 
-        return json.dumps(filtered, ensure_ascii=False)
+        return json.dumps(all_articles, ensure_ascii=False)
